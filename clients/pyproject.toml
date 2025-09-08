@@ -1,0 +1,31 @@
+[project]
+name = "clients"
+version = "0.1.0"
+description = "Clients for interacting with the user and doing semantic search and fts on the archon mcp server used as a resource for RAG."
+authors = [
+    {name = "Jonas Widmark",email = "jonas.widmark@hypergene.se"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "pydantic-ai (>=1.0.1,<2.0.0)",
+    "pydantic (>=2.11.7,<3.0.0)",
+    "dotenv (>=0.9.9,<0.10.0)",
+    "pydantic-logfire (>=0.0.1,<0.0.2)",
+    "streamlit (>=1.49.1,<2.0.0)",
+    "fastapi (>=0.116.1,<0.117.0)",
+    "uvicorn (>=0.35.0,<0.36.0)",
+    "asyncio (>=4.0.0,<5.0.0)",
+    "rich (>=14.1.0,<15.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "clients", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+cli = "clients.cli:main"
