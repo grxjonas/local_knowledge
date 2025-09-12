@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, ModelRetry
 from pydantic_ai.mcp import MCPServerStreamableHTTP
 import asyncio
 from rich.live import Live
@@ -12,18 +12,20 @@ from rich.text import Text
 from rich.console import Console, ConsoleOptions, RenderResult
 
 from clients.prompts import get_system_prompt, get_instructions
-from typing import TypedDict
+from typing import TypedDict, List, Optional
 import datetime
 from zoneinfo import ZoneInfo
 import logfire
 logfire.configure(token="pylf_v1_eu_Ws6XwsLq0GGmwCV1pQtzPZLZbkZg6h04kLmcwsqZWxM0",
 service_name="Hypergene Local Knowledge")
-logfire.instrument_pydantic_ai()
 cli_system_prompt = get_system_prompt()
 cli_instructions = get_instructions()
-# --- User deps ---
+from clients.context_utils import extract_user_query_from_ctx, find_matching_phrases
+
 WHOAMI = os.getenv("WHOAMI", "BI-Consultant")
-MYROLE = os.getenv("WHOAMI", "BI-Consultant at Hypergene AB")
+MYROLE = os.getenv("MYROLE", "BI-Consultant at Hypergene AB")
+CUSTOMER = os.getenv("CUSTOMER", "Hypergene")
+
 class User(TypedDict):
     name: str
     role: str
@@ -31,14 +33,13 @@ class User(TypedDict):
 
 def create_deps() -> User:
     now = datetime.datetime.now(tz=ZoneInfo("Europe/Madrid"))
-    return User(name=WHOAMI, role = MYROLE, current_time=now.isoformat())
+    return User(name=WHOAMI, role=MYROLE, current_time=now.isoformat())
 
 user = create_deps()
-CUSTOMER = os.getenv("CUSTOMER", "Hypergene")
 
 server = MCPServerStreamableHTTP("http://localhost:8051/mcp")
 
-agent = Agent("gpt-4o-mini", mcp_servers=[server], deps_type=User)
+agent = Agent("gpt-4o", mcp_servers=[server], deps_type=User)
 
 @agent.system_prompt(dynamic = True)
 def get_system_prompt(ctx: RunContext[User]) -> str:
@@ -59,7 +60,47 @@ def get_format_instructions(ctx: RunContext[User]) -> str:
         return cli_instructions + f" Nuvarande datum och tid är: {ctx.deps['current_time']}."
     else:
         return ""
-# --- Optional: prettify code blocks in CLI ---
+
+@agent.output_validator
+def log_missing_resources(ctx: Optional[RunContext[User]], data: str) -> str:
+    """
+    Validate result and log when the agent does not have enough resources to answer the user query.
+    Creates a span with attribute `no_resources=True` and `user_query`.
+    """
+    try:
+        matches = find_matching_phrases(data)
+        if matches:
+            user_query = extract_user_query_from_ctx(ctx) or "<unknown>"
+            
+            try:
+                with logfire.span("validate.missing_resources", _level="warning") as span:
+                    span.set_attribute("no_resources", True)
+                    span.set_attribute("user_name", ctx.deps['name'])
+                    span.set_attribute("user_role", ctx.deps['role'])
+                    span.set_attribute("missing_phrases", matches[:10])
+                    span.set_attribute("user_query", user_query)
+                    span.message = "Agent reported missing resources"
+            except Exception:
+                try:
+                    logfire.info("detected_missing_resources", attributes={
+                        "no_resources": True,
+                        "user_name": ctx.deps['name'],
+                        "user_role": ctx.deps['role'],
+                        "sample_phrase": matches[0],
+                        "user_query": user_query,
+                    })
+                except Exception:
+                    pass
+    except Exception as exc:
+        try:
+            logfire.error("log_missing_resources.failed", attributes={"error": str(exc)})
+        except Exception:
+            pass
+
+    return data
+
+logfire.instrument_pydantic_ai(agent)
+
 def prettier_code_blocks():
     """Make rich code blocks prettier and easier to copy."""
     class SimpleCodeBlock(CodeBlock):

@@ -9,8 +9,9 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 from openai import AsyncOpenAI
 import base64
+import logfire
+LOGFIRE_TOKEN = os.getenv("LOGFIRE_TOKEN", None)
 
-# pydantic-ai message helpers
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -26,12 +27,21 @@ import importlib
 importlib.reload(agent_script)
 expert = agent_script.agent
 
-# env / deps
+if "logfire_configured" not in st.session_state:
+    import logfire
+    logfire.configure(token="pylf_v1_eu_Ws6XwsLq0GGmwCV1pQtzPZLZbkZg6h04kLmcwsqZWxM0",
+    service_name="Hypergene Local Knowledge")
+    try:
+        logfire.instrument_pydantic_ai(expert)
+    except Exception:
+        pass
+    st.session_state.logfire_configured = True
+
 from dotenv import load_dotenv
 load_dotenv()
-WHOAMI = os.getenv("WHOAMI", "BI-Consultant at Hypergene AB")
+WHOAMI = os.getenv("WHOAMI", "BI-Consultant")
+MYROLE = os.getenv("MYROLE", "BI-Consultant at Hypergene AB")
 LANGUAGE = os.getenv("LANGUAGE", "ENG")
-
 
 def render_svg(svg_path: str):
     with open(svg_path, "r", encoding="utf-8") as f:
@@ -40,9 +50,14 @@ def render_svg(svg_path: str):
     html = f'<img src="data:image/svg+xml;base64,{b64}" />'
     st.write(html, unsafe_allow_html=True)
 
+class User(TypedDict):
+    name: str
+    role: str
+    current_time: str
+
 def create_deps():
     now = datetime.datetime.now(tz=ZoneInfo("Europe/Madrid"))
-    return {"name": WHOAMI, "current_time": now.isoformat()}
+    return User(name=WHOAMI, role=MYROLE, current_time=now.isoformat())
 
 deps = create_deps()
 
@@ -67,7 +82,6 @@ def display_message_part(part):
 # Streaming runner — do NOT handcraft history
 # -----------------------
 async def run_agent_with_streaming(user_input: str, placeholder):
-    # Use existing messages as-is. If empty, agent will generate system prompt.
     history = st.session_state.messages or None
 
     async with expert.run_stream(
@@ -114,7 +128,6 @@ else:
 user_input = st.chat_input(input_prompt)
 
 if user_input:
-    # Show the user's message immediately (do NOT push into session history yourself)
     with st.chat_message("user"):
         st.markdown(user_input)
     with st.chat_message("assistant"):
@@ -137,7 +150,4 @@ if user_input:
         """
         placeholder.markdown(spinner_html, unsafe_allow_html=True)
         asyncio.run(run_agent_with_streaming(user_input, placeholder))
-    # Create assistant placeholder and stream into it
-    # with st.chat_message("assistant"):
-    #     placeholder = st.empty()
-    #     asyncio.run(run_agent_with_streaming(user_input, placeholder))
+    

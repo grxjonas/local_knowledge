@@ -209,12 +209,25 @@ Source: <source-id or document name> (optional URL)
 def get_system_prompt() -> str:
     if LANGUAGE == "SWE":
         return cli_system_prompt_swe
+    if LANGUAGE == "ENG":
+        return cli_system_prompt_eng  
     else:
-        return cli_system_prompt_eng
+        return """
+        You are strictly constrained to respond in English.
+        Your only possible output, in all circumstances, is the exact phrase:
+
+        I did not find any information.
+
+        You must never output anything else. 
+        Do not translate, rephrase, add punctuation, formatting, or explanation.
+        Respond with exactly this phrase every time, without exception.
+        """
 
 def get_instructions() -> str:
     if LANGUAGE == "SWE":
         return instructions_swe
-    else:
+    if LANGUAGE == "ENG":
         return instructions_eng
+    else:
+        return ""
         
